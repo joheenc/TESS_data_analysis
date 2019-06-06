@@ -26,11 +26,11 @@ module WeirdDetector
     """
     function pointsify(df; keep_interpolated::Bool=false) :: Vector{Point}
         if keep_interpolated
-            df[df[:interpolated] .== true, :sigmaF] = mean(df[df[:interpolated] .== false, :sigmaF])
+            df[df.interpolated .== true, :sigmaF] = mean(df[df.interpolated .== false, :sigmaF])
         else
-           df = df[df[:interpolated] .== false, :]
+           df = df[df.interpolated .== false, :]
         end
-        Point.((df[:t]), (df[:F]), (df[:sigmaF]))
+        Point.((df.t), (df.F), (df.sigmaF))
     end
 
     function fold!(period::Float32, data::Array{Point})
@@ -221,8 +221,8 @@ module WeirdDetector
     function scrambled_periodogram(df::DataFrame, periods::Vector{Float32}; tess=false, kwargs...)
         df = deepcopy(df)
         dropmissing!(df, :F, disallowmissing=false)
-        df[:F] = df[randperm(size(df)[1]), :F]
-        df[:sigmaF] = df[randperm(size(df)[1]), :sigmaF]
+        df.F = df[randperm(size(df)[1]), :F]
+        df.sigmaF = df[randperm(size(df)[1]), :sigmaF]
         data = pointsify(df)
         periodogram(data, periods; kwargs...)
     end
@@ -258,24 +258,24 @@ module WeirdDetector
         med = map(1:nrows) do i
             lb = i-kw < 1 ? 1 : i-kw
             ub = i+kw < nrows ? i+kw : nrows
-            m = median(df[:F][lb:ub])
-            m, median(abs.(m .- df[:F][lb:ub]))
+            m = median(df.F[lb:ub])
+            m, median(abs.(m .- df.F[lb:ub]))
         end
         df = df[1+kw : end-kw, :]
         med = med[1+kw : end-kw]
         sigma = (m->m[2]).(med)
         med = (m->m[1]).(med)
         if usephoto
-            df[abs.(df[:F] .- med) .< threshold_sigma.*df[:sigmaF], :]
+            df[abs.(df.F .- med) .< threshold_sigma.*df.sigmaF, :]
         else
-            df[abs.(df[:F] .- med) .< threshold_sigma.*sigma.*1.4826, :]
+            df[abs.(df.F .- med) .< threshold_sigma.*sigma.*1.4826, :]
         end
     end
 
     "detrend with moving median.  This is a helper function for loadFITS"
     function detrend(df::DataFrame, P, trim=true, func=median)
-        m = func(df[:F])
-        df[:F] .-= m
+        m = func(df.F)
+        df.F .-= m
         fs = 60*24 / 29.4 #sampling frequency [days^-1]
         kw = Int(round(P*fs/2))
         nrows = size(df, 1)
@@ -283,9 +283,9 @@ module WeirdDetector
         for i in 1:nrows
             lb = i-kw < 1 ? 1 : i-kw
             ub = i+kw < nrows ? i+kw : nrows
-            smoothedF[i] = func(df[:F][lb:ub])
+            smoothedF[i] = func(df.F[lb:ub])
         end
-        df[:F] .= df[:F] .+ m .- smoothedF
+        df.F .= df.F .+ m .- smoothedF
         if trim
             df[1+kw: end-kw, :]
         else
@@ -296,7 +296,7 @@ module WeirdDetector
     "Interpolate missing points from LC.  This is a helper function for loadFITS"
     function interpolate_missing!(df::DataFrame; tess::Bool=false)
         #collect points to interpolate
-        df[:interpolated] = false
+        df.interpolated = false
         newTimes = Vector{Float64}()
         dt = 0.020416 #kepler cadence in days
         if (tess)
@@ -310,8 +310,8 @@ module WeirdDetector
                 push!(newTimes, t)
             end
         end
-        itp = Interpolations.interpolate((Vector{Float32}(df[:t]),),
-                                         Vector{Float32}(df[:F]), Gridded(Linear()))
+        itp = Interpolations.interpolate((Vector{Float32}(df.t),),
+                                         Vector{Float32}(df.F), Gridded(Linear()))
         for t in newTimes
             if (!tess)
                 row = [t, itp(t), missing, true]
@@ -385,7 +385,7 @@ module WeirdDetector
                 end
 
                 if usetimecorr
-                    df[:t] .+= df[:tcorr]
+                    df.t .+= df.tcorr
                 end
                 deletecols!(df, :tcorr)
                 dropmissing!(df, :F, disallowmissing=false)
@@ -393,11 +393,11 @@ module WeirdDetector
                 #remove outliers
                 df = prune(df, 5, 5, usephoto=false)
                 #drop bad points
-                df = df[df[:QUALITY] .== 0,:]
+                df = df[df.QUALITY .== 0,:]
                 deletecols!(df, :QUALITY)
 
 
-                ts = df[:t]
+                ts = df.t
                 delts = [ts[i+1] - ts[i] for i in 1:(length(ts)-1)]
                 boundaries = vcat([0], findall((dt->dt>splitwidth), delts), [length(ts)])
                 if boundaries == [0,0]
@@ -416,7 +416,7 @@ module WeirdDetector
 
         #detrend and normalize each segment
         for i in 1:length(dfs)
-            dfs[i][:F] = convert(Vector{Float32}, dfs[i][:F])
+            dfs[i].F = convert(Vector{Float32}, dfs[i].F)
 
             if (tic_id == "")
                 interpolate_missing!(dfs[i])
@@ -427,13 +427,12 @@ module WeirdDetector
                 dfs[i] = phasma(dfs[i], usephasmaP)
             elseif !nodetrend
                 dfs[i] = detrend(dfs[i], detrend_kw, trim, detrend_with)
-                println(size(detrend(dfs[i], detrend_kw, trim, detrend_with)))
             end
             #normalized each quarter individually
-            m = mean(dfs[i][:F])
-            dfs[i][:F] ./= m
-            dfs[i][:sigmaF] ./= m
-            dfs[i][:F] .-= 1
+            m = mean(dfs[i].F)
+            dfs[i].F ./= m
+            dfs[i].sigmaF ./= m
+            dfs[i].F .-= 1
         end
 
         if length(dfs) == 0
